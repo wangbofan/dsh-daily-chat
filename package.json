@@ -1,8 +1,16 @@
 {
   "name": "@local/dsh-daily-chat",
-  "version": "0.1.13",
+  "version": "0.2.0",
   "private": true,
-  "description": "Split New Session into 日常 (a lightweight chat agent) and 工作 (the shipped coding agent), with a daily-chat session list in the sidebar.",
+  "description": "Split New Session into 日常 (a lightweight chat agent whose persona is 「蓝色大肥鱼」, the DeepSeek whale-chan) and 工作 (the shipped coding agent), with a daily-chat session list in the sidebar that can delete single or multiple chats for real.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "daily-chat",
+    "蓝色大肥鱼",
+    "deepseek-chan",
+    "whale-chan"
+  ],
   "type": "module",
   "exports": {
     ".": "./index.js",
