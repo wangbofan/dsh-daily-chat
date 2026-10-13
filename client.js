@@ -100,6 +100,10 @@ window.__ModuleLoader__.load({
     const PANELS_KEY = 'dsh.daily-chat.panels';
     /** The `<html>` attribute the folded panel-list rule hangs off. */
     const PANELS_ATTRIBUTE = 'data-dsc-panels';
+    /** The single localStorage key holding the ids this page has deleted. */
+    const DELETED_KEY = 'dsh.daily-chat.deleted';
+    /** Where the Host half mounts the session-deletion route. */
+    const DELETE_ROUTE = '/dsh-daily-chat/delete';
     /** The glyph marker that tells this plugin's rows from every other one. */
     const ROW_MARKER = 'data-dsc-keep';
     /** The glyph marker the 「更多」 chevron turns over on. */
@@ -152,6 +156,22 @@ window.__ModuleLoader__.load({
       hourUnit: '小时',
       minuteUnit: '分',
       secondUnit: '秒',
+      deleteChat: '删除这段对话',
+      deleteConfirm: '删除后无法恢复，连同它的记录一起从磁盘上抹掉。确认删除？',
+      deleteConfirmMany: '删除后无法恢复，这 {n} 段对话连同它们的记录一起从磁盘上抹掉。确认删除？',
+      deleteRunning: '这段对话正在运行，先停下再删。',
+      selectRunningHint: '运行中的对话不能勾选。',
+      confirmDelete: '删除',
+      cancel: '取消',
+      deleting: '正在删除…',
+      deleteFailed: '删除失败',
+      deletePartial: '有 {n} 段没能删除',
+      select: '选择',
+      selectDone: '完成',
+      selectAll: '全选',
+      selectNone: '取消全选',
+      deleteSelected: '删除所选',
+      selectedCount: '已选 {n} 段',
     };
 
     const en = {
@@ -172,6 +192,22 @@ window.__ModuleLoader__.load({
       hourUnit: 'h ',
       minuteUnit: 'm ',
       secondUnit: 's',
+      deleteChat: 'Delete this chat',
+      deleteConfirm: 'This cannot be undone — the chat and its log are erased from disk. Delete it?',
+      deleteConfirmMany: 'This cannot be undone — these {n} chats and their logs are erased from disk. Delete them?',
+      deleteRunning: 'This chat is running — stop it before deleting.',
+      selectRunningHint: 'A running chat cannot be selected.',
+      confirmDelete: 'Delete',
+      cancel: 'Cancel',
+      deleting: 'Deleting…',
+      deleteFailed: 'Could not delete',
+      deletePartial: '{n} could not be deleted',
+      select: 'Select',
+      selectDone: 'Done',
+      selectAll: 'Select all',
+      selectNone: 'Select none',
+      deleteSelected: 'Delete selected',
+      selectedCount: '{n} selected',
     };
 
     const CSS = [
@@ -251,6 +287,62 @@ window.__ModuleLoader__.load({
       '.dsc-dot-on{background:var(--dsw-alias-state-success-primary)}',
       '.dsc-rowtitle{flex:1;min-width:0;overflow:hidden;font-size:13px;line-height:18px;text-overflow:ellipsis;white-space:nowrap}',
       '.dsc-empty{padding:10px 8px;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
+      // Deleting one chat. These live here rather than with the elapsed line's
+      // rules because this stylesheet is the one `DailyRegion` paints itself:
+      // the elapsed line's sheet only enters the document once a conversation
+      // turn renders, so a row styled from there is unstyled until the operator
+      // opens a chat and restyled the moment one appears, which reads as the
+      // delete button moving on its own.
+      //
+      // The button is an absolutely positioned overlay and the confirmation is
+      // an absolutely positioned popover, both inside the row wrapper, so
+      // neither takes width from the title box and neither adds height to the
+      // list: the rows below never move. The popover flips above the row when
+      // the row is the last one, because `.dsc-list` scrolls and would clip a
+      // popover that opened downwards past its bottom edge.
+      '.dsc-rowwrap{position:relative;display:flex}',
+      '.dsc-del{position:absolute;top:50%;right:4px;transform:translateY(-50%);display:none;align-items:center;justify-content:center;width:24px;height:24px;padding:0;font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:var(--dsw-alias-bg-layer-2);border:0;border-radius:50%}',
+      '.dsc-rowwrap:hover .dsc-del,.dsc-rowwrap:focus-within .dsc-del{display:inline-flex}',
+      '.dsc-del:hover{color:var(--dsw-alias-label-error);background:var(--dsw-alias-interactive-bg-hover-danger)}',
+      '.dsc-del:disabled{cursor:default;color:var(--dsw-alias-label-quaternary)}',
+      // Picking several chats at once. The tick replaces the row's status dot
+      // rather than joining it, so the title box keeps exactly the width it has
+      // in every other state and the rows never reflow between modes.
+      '.dsc-check{position:relative;box-sizing:border-box;flex:none;width:14px;height:14px;border:1px solid var(--dsw-alias-border-l2);border-radius:4px}',
+      '.dsc-check-on{background:var(--dsw-alias-brand-primary);border-color:transparent}',
+      '.dsc-check-on::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid var(--dsw-alias-label-primary-inverted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}',
+      '.dsc-check-off{opacity:.4}',
+      '.dsc-tool{flex:none;padding:3px 8px;font:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:6px}',
+      '.dsc-tool:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dsc-tool-on{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-brand-primary)}',
+      '.dsc-headActions{display:flex;align-items:center;gap:2px;flex:none}',
+      '.dsc-bulk{box-sizing:border-box;flex:none;display:flex;align-items:center;gap:8px;padding:6px 4px 8px}',
+      '.dsc-bulk-count{flex:1;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dsc-bulk-btn{flex:none;padding:4px 10px;font:inherit;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:6px}',
+      '.dsc-bulk-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dsc-bulk-btn.dsc-danger{color:var(--dsw-alias-label-primary-inverted);background:var(--dsw-alias-state-error-primary);border-color:transparent}',
+      '.dsc-bulk-btn.dsc-danger:hover{background:var(--dsw-alias-state-error-secondary)}',
+      '.dsc-bulk-btn:disabled{cursor:default;color:var(--dsw-alias-label-quaternary);background:transparent;border-color:var(--dsw-alias-border-l2)}',
+      // The confirmation is a frame-wide modal, NOT a popover in the list.
+      //
+      // It used to be one, and it was covered: `.dsc-list` is a scroll container
+      // (`overflow-y:auto`, which computes `overflow-x` to `auto` too), so an
+      // absolutely positioned child of it both clips at the container's edges
+      // and shares a paint order with every sibling row. A confirmation that
+      // the rows underneath can be painted over is a confirmation the operator
+      // may not read before answering. The overlay layer sits above the whole
+      // frame by construction, which is where the error toast already lives —
+      // so the modal cannot be covered by anything this plugin draws.
+      '.dsc-modal{position:fixed;inset:0;z-index:55;pointer-events:auto;display:flex;align-items:center;justify-content:center}',
+      '.dsc-scrim{position:absolute;inset:0;background:var(--dsw-alias-bg-mask-1,rgba(0,0,0,.5))}',
+      '.dsc-card{position:relative;display:flex;flex-direction:column;gap:12px;width:min(320px,calc(100vw - 48px));padding:16px;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.35)}',
+      '.dsc-card-text{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);word-break:break-word}',
+      '.dsc-card-actions{display:flex;gap:8px;justify-content:flex-end}',
+      '.dsc-card-btn{padding:4px 10px;font:inherit;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:6px}',
+      '.dsc-card-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dsc-card-btn.dsc-danger{color:var(--dsw-alias-label-primary-inverted);background:var(--dsw-alias-state-error-primary);border-color:transparent}',
+      '.dsc-card-btn.dsc-danger:hover{background:var(--dsw-alias-state-error-secondary)}',
+      '.dsc-card-btn:disabled{cursor:default;opacity:.6}',
     ].join('');
 
     /**
@@ -374,8 +466,96 @@ window.__ModuleLoader__.load({
       }
     }
 
-    let state = { mode: readMode(), panelsFolded: readPanels(), busy: false, error: null };
+    let state = {
+      mode: readMode(),
+      panelsFolded: readPanels(),
+      busy: false,
+      error: null,
+      /**
+       * The ids a confirmation is open for, or `null` when none is.
+       *
+       * A list rather than one id because the batch and the single row are the
+       * same act: one confirmation, one request, one outcome to report. The
+       * single row is the list of length one.
+       */
+      pending: null,
+      /** Whether an erase is in flight, which disables the confirmation's own buttons. */
+      deleting: false,
+      /** Whether the list is picking chats to erase instead of opening them. */
+      selecting: false,
+      /** The ids ticked in that mode. */
+      selected: [],
+    };
     const listeners = new Set();
+
+    /**
+     * Read the ids this page has already deleted from disk.
+     *
+     * The Host half erases a session's directory, but the session list this
+     * plugin renders is a projection the Host keeps — nothing guarantees it
+     * forgets the id in the same breath. A tombstone keeps a deleted row from
+     * reappearing in that window, and {@link pruneTombstones} drops it the
+     * moment the projection catches up, so the set cannot grow forever.
+     */
+    function readTombstones() {
+      try {
+        if (typeof localStorage === 'undefined') return [];
+        const raw = localStorage.getItem(DELETED_KEY);
+        if (raw === null) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((id) => typeof id === 'string');
+      } catch (reason) {
+        console.warn('[daily-chat] reading the deleted-session list failed:', reason);
+        return [];
+      }
+    }
+
+    function writeTombstones(ids) {
+      try {
+        if (typeof localStorage === 'undefined') return;
+        if (ids.length === 0) localStorage.removeItem(DELETED_KEY);
+        else localStorage.setItem(DELETED_KEY, JSON.stringify(ids));
+      } catch (reason) {
+        console.warn('[daily-chat] saving the deleted-session list failed:', reason);
+      }
+    }
+
+    /** Session ids erased from disk whose absence the projection may still report. */
+    let tombstones = readTombstones();
+    /** The store snapshot {@link tombstones} was last reconciled against. */
+    let tombstoneSnapshot = null;
+
+    /** Whether a session id has been deleted from disk by this page. */
+    function isDeleted(id) {
+      return tombstones.indexOf(id) !== -1;
+    }
+
+    /**
+     * Reconcile the tombstones against the freshest session projection: an id
+     * the projection no longer carries is gone for good, so its tombstone has
+     * done its job. Ids are only ever dropped here — a projection that still
+     * carries a deleted id leaves the tombstone in place.
+     *
+     * The gate on `phase` is load-bearing. The page starts with an EMPTY
+     * projection and only later fills it, and the store is re-pulled from
+     * scratch on every stream reconnect — pruning against that empty baseline
+     * would drop every tombstone the page ever wrote, and the rows would come
+     * back. A projection that is not ready yet is not evidence that anything is
+     * gone.
+     */
+    function pruneTombstones(sessions) {
+      if (sessions === null || typeof sessions !== 'object') return;
+      if (sessions.phase !== 'ready') return;
+      if (sessions === tombstoneSnapshot) return;
+      tombstoneSnapshot = sessions;
+      const byId = sessions.byId;
+      if (byId === null || typeof byId !== 'object') return;
+      const kept = tombstones.filter((id) => Object.prototype.hasOwnProperty.call(byId, id));
+      if (kept.length === tombstones.length) return;
+      tombstones = kept;
+      writeTombstones(tombstones);
+    }
 
     /**
      * Reflect the active mode onto the document, which is what the mode-scoped
@@ -502,6 +682,21 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Put a count into a translated sentence.
+     *
+     * The substitution is done here rather than by the translator because these
+     * strings are this plugin's own, and the slot's `t` is not documented to
+     * interpolate anything — a `{n}` left standing in the middle of a Chinese
+     * sentence is worse than a helper.
+     * @param text - the translated sentence, containing `{n}`.
+     * @param count - the number to place there.
+     * @returns the sentence with the count in it.
+     */
+    function fill(text, count) {
+      return text.replace('{n}', String(count));
+    }
+
     /* ── artwork ──────────────────────────────────────────────────────────── */
 
     /**
@@ -512,6 +707,15 @@ window.__ModuleLoader__.load({
      */
     const AddGlyph = typeof primitives.IconProjectAddOutline16 === 'function'
       ? primitives.IconProjectAddOutline16
+      : null;
+
+    /**
+     * The trash glyph the row action draws. Same contract as {@link AddGlyph}:
+     * taken from the primitives so the control looks like the shipped ones, with
+     * a bare multiplication sign for a build that does not ship it.
+     */
+    const DeleteGlyph = typeof primitives.IconTrashOutlineRegular === 'function'
+      ? primitives.IconTrashOutlineRegular
       : null;
 
     /**
@@ -962,18 +1166,27 @@ window.__ModuleLoader__.load({
          * @returns the snapshot to publish.
          */
         function visibleSessions(snapshot) {
-          if (state.mode !== 'work') return snapshot;
+          pruneTombstones(snapshot);
+          const inWork = state.mode === 'work';
+          const deleted = tombstones.length > 0;
+          if (!inWork && !deleted) return snapshot;
           const ids = snapshot === null || typeof snapshot !== 'object' ? undefined : snapshot.ids;
           const byId = snapshot === null || typeof snapshot !== 'object' ? undefined : snapshot.byId;
           if (!Array.isArray(ids) || byId === null || typeof byId !== 'object') return snapshot;
           const accounted = dailySessionIds();
           const expected = expectedDailyPath();
-          const hidden = (id) => isDailySession(id, byId, accounted, expected);
+          const hidden = (id) =>
+            (deleted && isDeleted(id)) ||
+            (inWork && isDailySession(id, byId, accounted, expected));
           if (!ids.some(hidden)) return snapshot;
+          // The two projections differ, so the cache is keyed by which one it
+          // holds as well as by the snapshot: a work-mode view is never served
+          // to chat mode, where the daily rows are the point.
+          const key = (inWork ? 'work' : 'daily') + '|' + tombstones.join(',');
           const cached = workModeSessionViews.get(snapshot);
-          if (cached !== undefined) return cached;
+          if (cached !== undefined && cached.key === key) return cached.filtered;
           const filtered = Object.assign({}, snapshot, { ids: ids.filter((id) => !hidden(id)) });
-          workModeSessionViews.set(snapshot, filtered);
+          workModeSessionViews.set(snapshot, { key, filtered });
           return filtered;
         }
 
@@ -1111,6 +1324,140 @@ window.__ModuleLoader__.load({
           }
         }
 
+        /**
+         * Erase daily chats from disk, for good.
+         *
+         * The Host half owns the erase: a page cannot unlink a file, and the log
+         * lives outside anything this half can reach, so this is a POST to the
+         * route the Host mounts. The rows are tombstoned only after the Host
+         * confirms, and only for the ids it reports as erased, so a refused or
+         * partly failed erase leaves the list honest — a delete that silently did
+         * nothing is worse than one that visibly failed.
+         *
+         * A batch is one request rather than a loop of single ones because a
+         * partial outcome is then reported once, with the ids it applies to,
+         * instead of the operator having to work out which of N toasts mattered.
+         *
+         * A running chat is refused before the request is even made. The
+         * persistence backend holds a write lock for the whole life of a live
+         * session, and pulling its log out from under the writer would corrupt
+         * the conversation the user is still having.
+         *
+         * @param ids - the session ids to erase.
+         */
+        async function deleteDaily(ids) {
+          if (ids.length === 0) return;
+          setState({ deleting: true, error: null });
+          // Let go of the chat before its log goes: the main column retains the
+          // session for as long as it is showing it, and a retained session is
+          // a live one on the Host's side. Releasing it first is what makes the
+          // delete a delete of a chat nobody is holding, rather than of one the
+          // next turn would write back.
+          const shown = ctx.uiWorkspace.mainReference;
+          if (shown !== undefined && ids.indexOf(shown.sessionId) !== -1
+            && typeof ctx.uiWorkspace.clearMain === 'function') {
+            ctx.uiWorkspace.clearMain();
+          }
+          try {
+            const response = await fetch(DELETE_ROUTE, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ sessionIds: ids }),
+            });
+            const result = await response.json().catch(() => null);
+            if (!response.ok || (result !== null && result.ok === false)) {
+              const detail = result !== null && typeof result.error === 'string'
+                ? result.error
+                : `HTTP ${response.status}`;
+              // A Host half older than this page reads `sessionId` alone, so the
+              // batch spelling reaches it as no id at all and comes back as a
+              // malformed id. That is a stale process rather than a bad id, and
+              // saying which is a restart versus a hunt.
+              if (response.status === 400 && detail.startsWith('not a session id')) {
+                throw new Error(`${detail}（若宿主半未重启，请完整退出 DSH 后重试）`);
+              }
+              throw new Error(detail);
+            }
+
+            const erased = Array.isArray(result?.erased) ? result.erased : [];
+            const failed = Array.isArray(result?.failed) ? result.failed : [];
+            let next = tombstones;
+            for (const id of erased) {
+              if (next.indexOf(id) === -1) next = next.concat([id]);
+            }
+            tombstones = next;
+            writeTombstones(tombstones);
+
+            // Only the ids that are actually gone leave the selection: a batch
+            // that partly failed stays open on what is still there, so the
+            // operator can retry exactly those. A batch that took everything it
+            // was asked for ends the mode as well — an empty checklist is not a
+            // state to leave someone standing in.
+            const left = state.selected.filter((id) => erased.indexOf(id) === -1);
+            setState({
+              deleting: false,
+              pending: null,
+              selected: left,
+              selecting: left.length === 0 ? false : state.selecting,
+              error: failed.length === 0
+                ? null
+                : `${fill(t('deletePartial'), failed.length)}：${failed.map((entry) => entry.error).join('；')}`,
+            });
+          } catch (reason) {
+            console.warn('[daily-chat] deleting a daily chat failed:', reason);
+            setState({ deleting: false, pending: null, error: `${t('deleteFailed')}：${describe(reason)}` });
+          }
+        }
+
+        /**
+         * Swap the list between opening chats and picking them.
+         *
+         * Leaving the mode drops the selection: a tick that outlived the mode it
+         * was made in would be a delete waiting to happen that nobody can see.
+         */
+        function toggleSelecting() {
+          setState(state.selecting
+            ? { selecting: false, selected: [] }
+            : { selecting: true, selected: [], pending: null });
+        }
+
+        /**
+         * Tick or untick one chat.
+         *
+         * A running chat is refused here rather than at the request, because the
+         * reason has to reach the operator while they are still choosing: a tick
+         * that looked accepted and then failed at the confirmation would be the
+         * worse of the two failures.
+         * @param id - the session id the row stands for.
+         * @param running - whether that session is live.
+         */
+        function toggleSelected(id, running) {
+          if (running === true) {
+            setState({ error: t('selectRunningHint') });
+            return;
+          }
+          const has = state.selected.indexOf(id) !== -1;
+          setState({
+            selected: has ? state.selected.filter((one) => one !== id) : state.selected.concat([id]),
+            error: null,
+          });
+        }
+
+        /**
+         * Tick every chat that may be ticked, or clear them all.
+         *
+         * Running chats are left alone in both directions: they cannot be
+         * erased, so counting them in a 「全选」 the confirmation would then
+         * refuse makes the count a lie.
+         * @param rows - the rows currently listed.
+         */
+        function toggleAllSelected(rows) {
+          const tickable = rows.filter((row) => row.running !== true).map((row) => row.id);
+          const all = tickable.length > 0 && tickable.every((id) => state.selected.indexOf(id) !== -1);
+          setState({ selected: all ? [] : tickable, error: null });
+        }
+
         /** The shipped New Session behaviour. */
         function startWorkSession() {
           startTicket += 1;
@@ -1138,9 +1485,14 @@ window.__ModuleLoader__.load({
           const rows = [];
           for (const id of workspace.sessionIds) {
             if (archived.indexOf(id) !== -1) continue;
-            const row = sessions.byId[id];
-            if (row === undefined || row.blank === true || row.origin === 'subagent') continue;
-            rows.push(row);
+            if (isDeleted(id)) continue;
+            const found = sessions.byId[id];
+            if (found === undefined || found.blank === true || found.origin === 'subagent') continue;
+            // The key is the authority, not the row's own `id` field: the erase
+            // is addressed by id, and a row whose field disagreed with the key it
+            // was filed under would ask the Host to delete something that is not
+            // in the list at all — or nothing, which reads as a failed delete.
+            rows.push(found.id === id ? found : { ...found, id });
           }
           rows.sort((left, right) => right.updatedAt - left.updatedAt);
           return rows;
@@ -1272,6 +1624,67 @@ window.__ModuleLoader__.load({
           ]);
         }
 
+        /**
+         * The confirmation an erase goes through.
+         *
+         * It is mounted on the frame-wide overlay layer, with the error toast,
+         * rather than inside the list it is asking about. That is the whole point
+         * of it being here: a panel painted inside `.dsc-list` — a scroll
+         * container — is clipped at that container's edges and shares a paint
+         * order with the rows around it, so the rows underneath can cover the
+         * question the operator is being asked. The overlay layer is above the
+         * frame by construction, and nothing this plugin draws can cover it.
+         *
+         * The scrim is a dismissal, not a decoration: clicking outside a
+         * confirmation is the conventional way to answer no, and it costs
+         * nothing here because the erase only ever happens on the button. It is
+         * inert while the request is in flight, when there is no longer an
+         * answer to change.
+         */
+        function DeleteConfirm(props) {
+          const t = props.t;
+          const chat = useChatState();
+          const ids = chat.pending;
+          if (ids === null) return null;
+
+          const busy = chat.deleting === true;
+          const question = ids.length === 1
+            ? t('deleteConfirm')
+            : fill(t('deleteConfirmMany'), ids.length);
+
+          return h('div', { className: 'dsc-modal', role: 'dialog', 'aria-modal': 'true' }, [
+            h('style', { key: 'css' }, CSS),
+            h('div', {
+              key: 'scrim',
+              className: 'dsc-scrim',
+              onClick: () => {
+                if (!busy) setState({ pending: null });
+              },
+            }),
+            h('div', { key: 'card', className: 'dsc-card' }, [
+              h('div', { key: 'text', className: 'dsc-card-text' }, question),
+              h('div', { key: 'actions', className: 'dsc-card-actions' }, [
+                h('button', {
+                  key: 'cancel',
+                  type: 'button',
+                  className: 'dsc-card-btn',
+                  disabled: busy,
+                  onClick: () => setState({ pending: null }),
+                }, t('cancel')),
+                h('button', {
+                  key: 'ok',
+                  type: 'button',
+                  className: 'dsc-card-btn dsc-danger',
+                  disabled: busy,
+                  onClick: () => {
+                    void deleteDaily(ids);
+                  },
+                }, busy ? t('deleting') : t('confirmDelete')),
+              ]),
+            ]),
+          ]);
+        }
+
         /* ── the daily browsing region ────────────────────────────────────── */
 
         /** The session list that stands in for the workspace browser in chat mode. */
@@ -1284,43 +1697,127 @@ window.__ModuleLoader__.load({
 
           const rows = dailyRows(workspaces, sessions);
 
+          // The ticks that still name a listed row. A selection can outlive the
+          // rows it was made from — a chat opened elsewhere, a projection that
+          // moved on — and neither the count nor the erase may name one of
+          // those: the count would be wrong and the erase would be refused.
+          const ticked = chat.selected.filter((id) => rows.some((row) => row.id === id));
+          const selecting = chat.selecting === true && rows.length > 0;
+          const busy = chat.busy === true || chat.deleting === true;
+
           return h('div', { className: 'dsc-region' + (wide ? '' : ' dsc-rail') }, [
             h('style', { key: 'css' }, CSS),
             h('div', { className: 'dsc-head', key: 'head' }, [
               h('div', { className: 'dsc-title', key: 'title' }, t('dailyChats')),
-              // The shipped header's add control: same glyph, same two sizes
-              // (16 in the expanded sidebar, 18 in the collapsed rail), same
-              // hover-only paint — a text button here would be the one row of
-              // the sidebar that speaks a different language.
-              h('button', {
-                key: 'new',
-                type: 'button',
-                className: 'dsc-new',
-                title: t('newChat'),
-                'aria-label': t('newChat'),
-                onClick: () => {
-                  void startDailyChat();
-                },
-              }, AddGlyph === null ? '＋' : h(AddGlyph, { size: wide ? 16 : 18 })),
+              // Two controls, add and pick, both in the header rather than in
+              // the list, so no row ever grows a second target and the rows keep
+              // the width they have in every other state. The picker is a
+              // labelled button because a checklist has no shipped glyph to
+              // borrow, and a guess at one would read as the wrong verb.
+              h('div', { className: 'dsc-headActions', key: 'actions' }, [
+                rows.length === 0 ? null : h('button', {
+                  key: 'select',
+                  type: 'button',
+                  className: 'dsc-tool' + (chat.selecting === true ? ' dsc-tool-on' : ''),
+                  title: chat.selecting === true ? t('selectDone') : t('select'),
+                  onClick: () => toggleSelecting(),
+                }, chat.selecting === true ? t('selectDone') : t('select')),
+                // The shipped header's add control: same glyph, same two sizes
+                // (16 in the expanded sidebar, 18 in the collapsed rail), same
+                // hover-only paint — a text button here would be the one row of
+                // the sidebar that speaks a different language.
+                h('button', {
+                  key: 'new',
+                  type: 'button',
+                  className: 'dsc-new',
+                  title: t('newChat'),
+                  'aria-label': t('newChat'),
+                  onClick: () => {
+                    void startDailyChat();
+                  },
+                }, AddGlyph === null ? '＋' : h(AddGlyph, { size: wide ? 16 : 18 })),
+              ]),
             ]),
             // The wrapper the shipped browser wraps its own list in; see the
             // `.dsc-listArea` rule for why the scrollbar needs it.
             h('div', { className: 'dsc-listArea', key: 'listArea' },
               h('div', { className: 'dsc-list', key: 'list' }, rows.length === 0
                 ? h('div', { className: 'dsc-empty', key: 'empty' }, chat.busy ? t('starting') : t('empty'))
-                : rows.map((row) => h('button', {
-                  key: row.id,
-                  type: 'button',
-                  className: 'dsc-row',
-                  title: row.displayTitle,
-                  onClick: () => openDaily(row.id),
-                }, [
-                  h('span', {
-                    key: 'dot',
-                    className: 'dsc-dot' + (row.running ? ' dsc-dot-on' : ''),
-                  }),
-                  h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
-                ])))),
+                : rows.map((row) => {
+                  const running = row.running === true;
+                  const checked = selecting && ticked.indexOf(row.id) !== -1;
+                  const children = [h('button', {
+                    key: 'row',
+                    type: 'button',
+                    className: 'dsc-row',
+                    title: row.displayTitle,
+                    onClick: () => {
+                      if (selecting) toggleSelected(row.id, running);
+                      else openDaily(row.id);
+                    },
+                  }, [
+                    // In select mode the tick takes the status dot's place, so
+                    // the title box is the same width in both modes and a row
+                    // never reflows as the mode changes.
+                    selecting
+                      ? h('span', {
+                        key: 'check',
+                        className: 'dsc-check'
+                          + (checked ? ' dsc-check-on' : '')
+                          + (running ? ' dsc-check-off' : ''),
+                      })
+                      : h('span', {
+                        key: 'dot',
+                        className: 'dsc-dot' + (running ? ' dsc-dot-on' : ''),
+                      }),
+                    h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
+                  ])];
+                  if (!selecting) {
+                    // A sibling of the row rather than a child of it: a button
+                    // inside a button is invalid HTML, and the browser would hoist
+                    // it out anyway. It is absolutely positioned over the row's
+                    // right edge — see the `.dsc-del` rule for why it may not take
+                    // width from the title box.
+                    children.push(h('button', {
+                      key: 'del',
+                      type: 'button',
+                      className: 'dsc-del',
+                      title: running ? t('deleteRunning') : t('deleteChat'),
+                      'aria-label': t('deleteChat'),
+                      disabled: busy,
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        if (running) {
+                          setState({ pending: null, error: t('deleteRunning') });
+                          return;
+                        }
+                        setState({ pending: [row.id], error: null });
+                      },
+                    }, DeleteGlyph === null ? '×' : h(DeleteGlyph, { size: 14 })));
+                  }
+                  return h('div', { key: row.id, className: 'dsc-rowwrap' }, children);
+                })),
+            ),
+            // The batch bar takes the place a rail would leave empty, and only
+            // exists while there is a selection to act on.
+            selecting ? h('div', { className: 'dsc-bulk', key: 'bulk' }, [
+              h('button', {
+                key: 'all',
+                type: 'button',
+                className: 'dsc-bulk-btn',
+                onClick: () => toggleAllSelected(rows),
+              }, rows.some((row) => row.running !== true && ticked.indexOf(row.id) === -1)
+                ? t('selectAll')
+                : t('selectNone')),
+              h('span', { key: 'count', className: 'dsc-bulk-count' }, fill(t('selectedCount'), ticked.length)),
+              h('button', {
+                key: 'go',
+                type: 'button',
+                className: 'dsc-bulk-btn dsc-danger',
+                disabled: ticked.length === 0 || busy,
+                onClick: () => setState({ pending: ticked.slice(), error: null }),
+              }, t('deleteSelected')),
+            ]) : null,
           ]);
         }
 
@@ -1453,6 +1950,15 @@ window.__ModuleLoader__.load({
           order: 50,
           locale: LOCALE_NS,
         }, ErrorToast));
+
+        // Under the toast, so a failure raised by an erase paints over the
+        // confirmation it came from rather than behind it.
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'daily-chat-confirm',
+          order: 40,
+          locale: LOCALE_NS,
+        }, DeleteConfirm));
 
         // Only one entry renders a `single` slot, and it is the LOWEST live
         // priority — so `-1` takes the region over for chat mode and giving the
